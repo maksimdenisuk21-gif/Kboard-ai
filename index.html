@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KBoard AI</title>
+<script>
+  // ставим тему ДО отрисовки, чтобы не было "вспышки" не той темы
+  document.documentElement.setAttribute('data-theme', localStorage.getItem('kb_theme') || 'dark');
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root, :root[data-theme="dark"]{
+    --bg:#262624; --panel:#2B2A28; --panel2:#333230; --border:#413F3B;
+    --text:#EFEBE3; --muted:#9C948A; --accent:#CC7A52; --accent-hover:#B96944;
+    --accent-soft:rgba(204,122,82,.16); --accent2:#D9A873;
+    --danger:#E5484D; --radius:12px;
+  }
+  :root[data-theme="light"]{
+    --bg:#F7F3EA; --panel:#EFEADD; --panel2:#E7E1D1; --border:#DCD3BE;
+    --text:#2B2823; --muted:#7A7266; --accent:#CC7A52; --accent-hover:#B96944;
+    --accent-soft:rgba(204,122,82,.14); --accent2:#B5794A;
+    --danger:#C0413D; --radius:12px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    height:100vh;overflow:hidden;}
+  .app{display:flex;height:100vh;position:relative;}
+
+  /* Sidebar (off-canvas, closed by default) */
+  .sidebar{width:260px;max-width:82vw;background:var(--panel);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;flex-shrink:0;
+    position:fixed;top:0;left:0;height:100vh;z-index:100;
+    transform:translateX(-100%);transition:transform .22s ease;
+    box-shadow:0 0 0 rgba(0,0,0,0);}
+  .sidebar.open{transform:translateX(0);box-shadow:8px 0 24px rgba(0,0,0,.35);}
+  .sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90;
+    opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  .sidebar-overlay.show{opacity:1;pointer-events:auto;}
+  .brand{padding:20px 18px 14px;display:flex;align-items:center;gap:10px;}
+  .brand-mark{width:30px;height:30px;border-radius:8px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    flex-shrink:0;}
+  .brand-name{font-weight:700;font-size:16px;letter-spacing:.2px;}
+  .nav{padding:8px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;
+    color:var(--muted);cursor:pointer;font-size:14px;user-select:none;}
+  .nav-item:hover{background:var(--panel2);color:var(--text);}
+  .nav-item.active{background:var(--accent-soft);color:var(--text);}
+  .nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);
+    opacity:0;flex-shrink:0;}
+  .nav-item.active .dot{opacity:1;}
+  .projects-list{padding:4px 8px;overflow-y:auto;max-height:160px;}
+  .proj-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:7px;
+    font-size:13px;color:var(--muted);cursor:pointer;}
+  .proj-row:hover,.proj-row.active{background:var(--panel2);color:var(--text);}
+  .sidebar-foot{padding:12px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);}
+
+  /* Main */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;width:100%;}
+  .topbar{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;
+    align-items:center;gap:12px;flex-shrink:0;}
+  .topbar-titles{display:flex;flex-direction:column;min-width:0;}
+  .topbar h1{font-size:15px;margin:0;font-weight:600;}
+  .topbar .sub{font-size:12px;color:var(--muted);margin-top:2px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #menuToggle{font-size:18px;flex-shrink:0;}
+  .view{flex:1;overflow-y:auto;padding:22px;display:none;}
+  .view.active{display:block;}
+
+  /* Chat */
+  .view#view-chat{display:none;flex-direction:column;padding:0;}
+  .view#view-chat.active{display:flex;}
+  .chat-log{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:18px;}
+  .msg{position:relative;max-width:70%;font-size:14.5px;line-height:1.6;
+    white-space:pre-wrap;word-wrap:break-word;}
+  .msg.user{align-self:flex-end;background:var(--panel2);border:1px solid var(--border);
+    padding:11px 15px;border-radius:14px;border-bottom-right-radius:4px;}
+  .msg.assistant{align-self:flex-start;max-width:80%;padding:0;}
+  .msg.system-note{align-self:center;color:var(--muted);font-size:12px;}
+  .msg img{max-width:220px;border-radius:8px;display:block;margin-top:6px;}
+  .copy-btn{opacity:0;transition:opacity .15s;margin-top:8px;background:none;border:none;
+    color:var(--muted);font-size:11.5px;cursor:pointer;padding:0;}
+  .msg:hover .copy-btn{opacity:1;}
+  .copy-btn:hover{color:var(--accent);}
+  .empty-chat{margin:auto;text-align:center;color:var(--muted);}
+  .empty-chat .em-icon{width:44px;height:44px;border-radius:12px;margin:0 auto 14px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));}
+  .chat-input-bar{border-top:1px solid var(--border);padding:14px 22px;flex-shrink:0;}
+  .chat-input-row{display:flex;gap:10px;align-items:flex-end;background:var(--panel2);
+    border:1px solid var(--border);border-radius:12px;padding:8px 8px 8px 14px;}
+  .chat-input-row textarea{flex:1;background:none;border:none;outline:none;color:var(--text);
+    font-size:14px;resize:none;max-height:120px;font-family:inherit;padding:6px 0;}
+  .icon-btn{width:36px;height:36px;border-radius:8px;border:none;background:transparent;
+    color:var(--muted);cursor:pointer;font-size:16px;flex-shrink:0;display:flex;
+    align-items:center;justify-content:center;}
+  .icon-btn:hover{background:var(--border);color:var(--text);}
+  .send-btn{background:var(--accent);color:#fff;}
+  .send-btn:hover{background:var(--accent-hover);}
+  .attach-preview{display:flex;gap:8px;padding:0 0 8px;flex-wrap:wrap;}
+  .attach-chip{display:flex;align-items:center;gap:6px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:12px;color:var(--muted);}
+  .attach-chip button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;}
+
+  /* Generic forms */
+  label.field-label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;margin-top:16px;}
+  textarea.field, input.field{width:100%;background:var(--panel2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);padding:11px 13px;font-size:14px;font-family:inherit;outline:none;}
+  textarea.field:focus, input.field:focus{border-color:var(--accent);}
+  textarea.field{resize:vertical;min-height:160px;line-height:1.5;}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 18px;
+    font-size:13px;font-weight:600;cursor:pointer;}
+  .btn:hover{background:var(--accent-hover);}
+  .btn.secondary{background:var(--panel2);border:1px solid var(--border);color:var(--text);}
+  .btn.secondary:hover{border-color:var(--accent);}
+  .btn.danger{background:transparent;border:1px solid var(--danger);color:var(--danger);}
+  .row{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px;margin-bottom:14px;}
+  .card-title{font-size:14px;font-weight:600;margin-bottom:4px;}
+  .max-col{max-width:640px;}
+
+  /* Memory list */
+  .mem-item{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+    background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;
+    margin-bottom:8px;font-size:14px;}
+  .mem-item button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;}
+  .mem-item button:hover{color:var(--danger);}
+
+  /* Projects grid */
+  .proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}
+  .proj-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:16px;cursor:pointer;}
+  .proj-card:hover{border-color:var(--accent);}
+  .proj-card h3{margin:0 0 4px;font-size:14px;}
+  .proj-card p{margin:0;font-size:12px;color:var(--muted);}
+
+  .badge-ok{color:var(--accent2);}
+  .badge-warn{color:#F5A623;}
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+
+  @media (max-width:600px){
+    .msg{max-width:86%;font-size:13.5px;}
+    .view{padding:16px;}
+    .chat-log{padding:16px;}
+    .chat-input-bar{padding:10px 14px;}
+    .topbar{padding:12px 14px;}
+    .proj-grid{grid-template-columns:1fr 1fr;}
+    .card{padding:14px;}
+    textarea.field{min-height:120px;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <div class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">KBoard AI</div>
+    </div>
+    <div class="nav">
+      <div class="nav-item active" data-view="chat"><span class="dot"></span>Чат</div>
+      <div class="nav-item" data-view="projects"><span class="dot"></span>Проекты</div>
+      <div class="nav-item" data-view="memory"><span class="dot"></span>Память</div>
+      <div class="nav-item" data-view="training"><span class="dot"></span>Обучение</div>
+      <div class="nav-item" data-view="settings"><span class="dot"></span>Настройки</div>
+    </div>
+    <div style="padding:0 14px 4px;font-size:11px;color:var(--muted);">Проекты</div>
+    <div class="projects-list" id="sidebarProjects"></div>
+    <div class="sidebar-foot" id="apiStatus">Ключ API не задан</div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn" id="menuToggle" title="Меню">☰</button>
+      <div class="topbar-titles">
+        <h1 id="topTitle">Чат</h1>
+        <div class="sub" id="topSub">openai/gpt-oss-120b · через Groq</div>
+      </div>
+      <button class="icon-btn" id="themeToggle" title="Сменить тему" style="margin-left:auto;">🌙</button>
+    </div>
+
+    <!-- CHAT -->
+    <div class="view" id="view-chat">
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-input-bar">
+        <div class="attach-preview" id="attachPreview"></div>
+        <div class="chat-input-row">
+          <button class="icon-btn" id="attachBtn" title="Прикрепить фото">📎</button>
+          <input type="file" id="fileInput" accept="image/*" style="display:none">
+          <textarea id="chatInput" rows="1" placeholder="Напишите сообщение..."></textarea>
+          <button class="icon-btn send-btn" id="sendBtn" title="Отправить">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div class="view" id="view-projects">
+      <div class="row" style="margin-top:0;">
+        <button class="btn" id="newProjectBtn">+ Новый проект</button>
+      </div>
+      <div class="proj-grid" id="projGrid" style="margin-top:16px;"></div>
+    </div>
+
+    <!-- MEMORY -->
+    <div class="view" id="view-memory">
+      <div class="card max-col">
+        <div class="card-title">Долговременная память</div>
+        <div class="hint">Факты отсюда добавляются в каждый разговор — так модель "помнит" о пользователе или контексте между сессиями.</div>
+      </div>
+      <div class="row" style="margin-top:0;">
+        <input class="field" id="memInput" placeholder="Например: пользователя зовут Кирилл, делает проект KBoard AI" style="flex:1;">
+        <button class="btn" id="addMemBtn">Добавить</button>
+      </div>
+      <div id="memList" style="margin-top:16px;max-width:640px;"></div>
+    </div>
+
+    <!-- TRAINING -->
+    <div class="view" id="view-training">
+      <div class="card max-col">
+        <div class="card-title">Характер модели</div>
+        <div class="hint">Системный промпт — здесь описывается, кто ИИ, как себя ведёт, какой у него стиль общения и ограничения. Это и есть "обучение" через характер.</div>
+      </div>
+      <label class="field-label">Описание персонажа / системный промпт</label>
+      <textarea class="field max-col" id="characterInput" placeholder="Ты — KBoard AI, дружелюбный ассистент по программированию. Отвечай кратко, на русском, с примерами кода когда уместно..."></textarea>
+      <div class="row">
+        <button class="btn" id="saveCharBtn">Сохранить</button>
+        <span class="hint" id="charSavedNote" style="margin-top:0;"></span>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="view" id="view-settings">
+      <div class="card max-col">
+        <div class="card-title">Тема оформления</div>
+        <div class="hint">Тёмная — приглушённый графит с оранжевым акцентом. Светлая — тёплый светлый фон, тот же акцент.</div>
+        <div class="row">
+          <button class="btn secondary" id="themeDarkBtn">Тёмная</button>
+          <button class="btn secondary" id="themeLightBtn">Светлая</button>
+        </div>
+      </div>
+
+      <div class="card max-col">
+        <div class="card-title">Где живёт API-ключ</div>
+        <div class="hint">Ключ Groq больше не вводится на этой странице и не хранится в браузере. Он задан как переменная окружения <b>GROQ_API_KEY</b> в настройках проекта на Vercel и используется только внутри серверной функции <code>/api/chat</code>. Ни один посетитель сайта не может его увидеть — даже через просмотр исходного кода.</div>
+      </div>
+
+      <div class="card max-col">
+        <div class="card-title">Модели</div>
+        <div class="hint">Текст → <b>openai/gpt-oss-120b</b>.<br>Сообщения с фото → автоматически <b>qwen/qwen3.6-27b</b> (умеет анализировать изображения). Переключение происходит само, вручную выбирать не нужно.</div>
+      </div>
+
+      <div class="card max-col" style="margin-top:24px;border-color:var(--danger);">
+        <div class="card-title" style="color:var(--danger);">Если нужно сменить ключ</div>
+        <div class="hint">Зайдите в проект на vercel.com → Settings → Environment Variables → обновите GROQ_API_KEY → нажмите Redeploy. Сам ключ никогда не должен появляться в коде сайта или в чатах.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const CHAT_ENDPOINT = "/api/chat"; // свой сервер, ключ Groq хранится там, не в браузере
+const MODEL = "openai/gpt-oss-120b";
+
+let state = {
+  character: localStorage.getItem('kb_character') || 'Ты — KBoard AI, полезный и дружелюбный ассистент. Отвечай ясно и по делу, на языке пользователя.',
+  memory: JSON.parse(localStorage.getItem('kb_memory') || '[]'),
+  projects: JSON.parse(localStorage.getItem('kb_projects') || 'null') || [
+    {id: 'default', name: 'Общий чат', messages: []}
+  ],
+  activeProject: localStorage.getItem('kb_activeProject') || 'default',
+  pendingImage: null
+};
+
+function persist(){
+  localStorage.setItem('kb_character', state.character);
+  localStorage.setItem('kb_memory', JSON.stringify(state.memory));
+  localStorage.setItem('kb_projects', JSON.stringify(state.projects));
+  localStorage.setItem('kb_activeProject', state.activeProject);
+}
+
+function getActiveProject(){
+  return state.projects.find(p => p.id === state.activeProject) || state.projects[0];
+}
+
+// ---- Theme ----
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('kb_theme', t);
+  document.getElementById('themeToggle').textContent = t==='dark' ? '☀️' : '🌙';
+}
+document.getElementById('themeToggle').onclick = ()=>{
+  const cur = document.documentElement.getAttribute('data-theme');
+  setTheme(cur==='dark' ? 'light' : 'dark');
+};
+document.getElementById('themeDarkBtn').onclick = ()=>setTheme('dark');
+document.getElementById('themeLightBtn').onclick = ()=>setTheme('light');
+setTheme(document.documentElement.getAttribute('data-theme'));
+
+// ---- Sidebar open/close ----
+const sidebarEl = document.getElementById('sidebar');
+const overlayEl = document.getElementById('sidebarOverlay');
+function openSidebar(){ sidebarEl.classList.add('open'); overlayEl.classList.add('show'); }
+function closeSidebar(){ sidebarEl.classList.remove('open'); overlayEl.classList.remove('show'); }
+document.getElementById('menuToggle').onclick = ()=>{
+  sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
+};
+overlayEl.onclick = closeSidebar;
+
+// ---- Navigation ----
+const views = ['chat','projects','memory','training','settings'];
+const titles = {chat:'Чат', projects:'Проекты', memory:'Память', training:'Обучение', settings:'Настройки'};
+function showView(name){
+  views.forEach(v=>{
+    document.getElementById('view-'+v).classList.toggle('active', v===name);
+  });
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    el.classList.toggle('active', el.dataset.view===name);
+  });
+  document.getElementById('topTitle').textContent = titles[name];
+  document.getElementById('topSub').textContent = name==='chat'
+    ? MODEL+' · через Groq · '+getActiveProject().name
+    : 'openai/gpt-oss-120b · через Groq';
+  if(name==='memory') renderMemory();
+  if(name==='projects') renderProjects();
+  if(name==='training') document.getElementById('characterInput').value = state.character;
+  if(name==='chat') renderChat();
+}
+document.querySelectorAll('.nav-item').forEach(el=>{
+  el.addEventListener('click', ()=>{ showView(el.dataset.view); closeSidebar(); });
+});
+
+// ---- Sidebar projects ----
+function renderSidebarProjects(){
+  const c = document.getElementById('sidebarProjects');
+  c.innerHTML = '';
+  state.projects.forEach(p=>{
+    const row = document.createElement('div');
+    row.className = 'proj-row'+(p.id===state.activeProject?' active':'');
+    row.textContent = p.name;
+    row.onclick = ()=>{ state.activeProject = p.id; persist(); renderSidebarProjects(); showView('chat'); closeSidebar(); };
+    c.appendChild(row);
+  });
+}
+
+// ---- Chat rendering ----
+function renderChat(){
+  const log = document.getElementById('chatLog');
+  const proj = getActiveProject();
+  log.innerHTML = '';
+  if(proj.messages.length===0){
+    log.innerHTML = `<div class="empty-chat"><div class="em-icon"></div>Начните разговор с KBoard AI<br><span style="font-size:12px;">Персонаж настраивается во вкладке «Обучение»</span></div>`;
+    return;
+  }
+  proj.messages.forEach(m=>{
+    const div = document.createElement('div');
+    div.className = 'msg '+m.role;
+    const textEl = document.createElement('div');
+    textEl.textContent = m.content;
+    div.appendChild(textEl);
+    if(m.image){
+      const img = document.createElement('img');
+      img.src = m.image;
+      div.appendChild(img);
+    }
+    if(m.role==='assistant'){
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'copy-btn';
+      copyBtn.textContent = 'Копировать';
+      copyBtn.onclick = ()=>{
+        navigator.clipboard.writeText(m.content).catch(()=>{});
+        copyBtn.textContent = 'Скопировано';
+        setTimeout(()=>copyBtn.textContent='Копировать', 1500);
+      };
+      div.appendChild(copyBtn);
+    }
+    log.appendChild(div);
+  });
+  log.scrollTop = log.scrollHeight;
+}
+
+function addMessage(role, content, image){
+  const proj = getActiveProject();
+  proj.messages.push({role, content, image: image||null});
+  persist();
+  renderChat();
+}
+
+async function sendMessage(){
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if(!text && !state.pendingImage) return;
+  addMessage('user', text || 'Что на этом фото?', state.pendingImage);
+  const imgWasAttached = !!state.pendingImage;
+  state.pendingImage = null;
+  document.getElementById('attachPreview').innerHTML = '';
+  input.value = '';
+
+  const proj = getActiveProject();
+  const systemContent = [
+    state.character,
+    state.memory.length ? 'Известные факты о пользователе/контексте:\n- ' + state.memory.join('\n- ') : ''
+  ].filter(Boolean).join('\n\n');
+
+  const apiMessages = [
+    {role:'system', content: systemContent},
+    ...proj.messages
+      .filter(m=>m.role==='user'||m.role==='assistant')
+      .map(m=> m.image
+        ? {role:m.role, content:[{type:'text', text:m.content},{type:'image_url', image_url:{url:m.image}}]}
+        : {role:m.role, content:m.content})
+  ];
+  const hasImage = apiMessages.some(m=>Array.isArray(m.content));
+
+  addMessage('assistant', '...');
+  try{
+    const res = await fetch(CHAT_ENDPOINT, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({messages: apiMessages, hasImage})
+    });
+    const data = await res.json();
+    proj.messages.pop(); // remove '...'
+    if(!res.ok){
+      addMessage('system-note', 'Ошибка API: '+(data.error?.message || data.error || res.status));
+    } else {
+      const reply = data.choices?.[0]?.message?.content || '(пустой ответ)';
+      addMessage('assistant', reply);
+    }
+  }catch(e){
+    proj.messages.pop();
+    addMessage('system-note', 'Не удалось связаться с API: '+e.message);
+  }
+  persist();
+}
+
+document.getElementById('sendBtn').onclick = sendMessage;
+document.getElementById('chatInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
+});
+document.getElementById('chatInput').addEventListener('input', function(){
+  this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px';
+});
+
+// ---- Attachments ----
+document.getElementById('attachBtn').onclick = ()=>document.getElementById('fileInput').click();
+document.getElementById('fileInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    state.pendingImage = reader.result;
+    const p = document.getElementById('attachPreview');
+    p.innerHTML = `<div class="attach-chip">📷 ${file.name} <button id="removeAttach">✕</button></div>`;
+    document.getElementById('removeAttach').onclick = ()=>{ state.pendingImage=null; p.innerHTML=''; };
+  };
+  reader.readAsDataURL(file);
+});
+
+// ---- Projects ----
+function renderProjects(){
+  const grid = document.getElementById('projGrid');
+  grid.innerHTML = '';
+  state.projects.forEach(p=>{
+    const card = document.createElement('div');
+    card.className = 'proj-card';
+    card.innerHTML = `<h3>${p.name}</h3><p>${p.messages.length} сообщений</p>`;
+    card.onclick = ()=>{ state.activeProject = p.id; persist(); renderSidebarProjects(); showView('chat'); };
+    grid.appendChild(card);
+  });
+}
+document.getElementById('newProjectBtn').onclick = ()=>{
+  const name = prompt('Название проекта:');
+  if(!name) return;
+  const id = 'p_'+Date.now();
+  state.projects.push({id, name, messages: []});
+  state.activeProject = id;
+  persist();
+  renderSidebarProjects();
+  renderProjects();
+};
+
+// ---- Memory ----
+function renderMemory(){
+  const list = document.getElementById('memList');
+  list.innerHTML = '';
+  if(state.memory.length===0){
+    list.innerHTML = '<div class="hint">Пока ничего не сохранено.</div>';
+    return;
+  }
+  state.memory.forEach((m,i)=>{
+    const row = document.createElement('div');
+    row.className = 'mem-item';
+    row.innerHTML = `<span>${m}</span><button data-i="${i}">✕</button>`;
+    row.querySelector('button').onclick = ()=>{
+      state.memory.splice(i,1); persist(); renderMemory();
+    };
+    list.appendChild(row);
+  });
+}
+document.getElementById('addMemBtn').onclick = ()=>{
+  const input = document.getElementById('memInput');
+  const v = input.value.trim();
+  if(!v) return;
+  state.memory.push(v);
+  input.value='';
+  persist();
+  renderMemory();
+};
+
+// ---- Training ----
+document.getElementById('saveCharBtn').onclick = ()=>{
+  state.character = document.getElementById('characterInput').value;
+  persist();
+  const note = document.getElementById('charSavedNote');
+  note.textContent = 'Сохранено ✓';
+  setTimeout(()=>note.textContent='', 1800);
+};
+
+// ---- Init ----
+renderSidebarProjects();
+document.getElementById('apiStatus').innerHTML = '<span class="badge-ok">● Ключ на сервере</span>';
+showView('chat');
+</script>
+</body>
+</html>
